@@ -66,7 +66,7 @@ static ngx_command_t ngx_http_set_jwt_commands[] = {
     { ngx_string("set_jwt"),
       NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
       ndk_set_var_value,
-      0,
+      NGX_HTTP_LOC_CONF_OFFSET,
       0,
       &ngx_http_set_jwt_filter },
     { ngx_string("set_jwt_algorithm"),
@@ -77,7 +77,7 @@ static ngx_command_t ngx_http_set_jwt_commands[] = {
       &ngx_http_set_jwt_algorithms },
     { ngx_string("set_jwt_expires"),
       NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_num_slot,
+      ngx_conf_set_sec_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_set_jwt_conf_t, expires),
       NULL },
@@ -137,6 +137,7 @@ ngx_http_set_jwt_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child) {
 
     ngx_conf_merge_str_value(conf->key, prev->key, "");
     ngx_conf_merge_uint_value(conf->algorithm, prev->algorithm, JWT_ALG_HS512);
+    ngx_conf_merge_sec_value(conf->expires, prev->expires, NGX_CONF_UNSET);
 
     return NGX_CONF_OK;
 }
