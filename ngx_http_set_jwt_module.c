@@ -147,44 +147,60 @@ static char *
 ngx_http_set_jwt_key_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     ngx_str_t          *key = conf;
     ngx_str_t          *args = cf->args->elts;
-    ngx_fd_t            fd;
     ngx_file_t          file;
     ngx_file_info_t     fi;
     size_t              size;
     ssize_t             n;
 
-    fd = ngx_open_file(args[1].data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
-    if (fd == NGX_INVALID_FILE) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, ngx_errno,
-                        ngx_open_file_n " \"%s\" failed", args[1].data);
-        return NGX_CONF_ERROR;
-    }
-
-    if (ngx_fd_info(fd, &fi) == NGX_FILE_ERROR) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, ngx_errno,
-                        ngx_fd_info_n " \"%s\" failed", args[1].data);
-        ngx_close_file(fd);
-        return NGX_CONF_ERROR;
-    }
-
-    size = ngx_file_size(&fi);
-    key->data = ngx_palloc(cf->pool, size);
-    if (key->data == NULL) {
-        ngx_close_file(fd);
+    if (ngx_conf_full_name(cf->cycle, &args[1], 1) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
     ngx_memzero(&file, sizeof(ngx_file_t));
-    file.fd = fd;
     file.name = args[1];
     file.log = cf->log;
 
-    n = ngx_read_file(&file, key->data, size, 0);
-    if (n == NGX_ERROR || (size_t) n != size) {
+    file.fd = ngx_open_file(file.name.data, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
+
+    if (file.fd == NGX_INVALID_FILE) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, ngx_errno,
-                        ngx_read_file_n " \"%s\" failed", args[1].data);
-        ngx_close_file(fd);
+                           ngx_open_file_n " \"%V\" failed", &file.name);
         return NGX_CONF_ERROR;
+    }
+
+    if (ngx_fd_info(file.fd, &fi) == NGX_FILE_ERROR) {
+        ngx_conf_log_error(NGX_LOG_CRIT, cf, ngx_errno,
+                           ngx_fd_info_n " \"%V\" failed", &file.name);
+        goto failed;
+    }
+
+    size = ngx_file_size(&fi);
+
+    if (size == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "\"%V\" zero key size", &file.name);
+        goto failed;
+    }
+
+    key->data = ngx_palloc(cf->pool, size);
+
+    if (key->data == NULL) {
+        goto failed;
+    }
+
+    n = ngx_read_file(&file, key->data, size, 0);
+
+    if (n == NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_CRIT, cf, ngx_errno,
+                           ngx_read_file_n " \"%V\" failed", &file.name);
+        goto failed;
+    }
+
+    if ((size_t) n != size) {
+        ngx_conf_log_error(NGX_LOG_CRIT, cf, 0,
+                           ngx_read_file_n " \"%V\" returned only "
+                           "%z bytes instead of %uz", &file.name, n, size);
+        goto failed;
     }
 
     while (size && (*key->data == ' ' || *key->data == '\t' ||
@@ -198,12 +214,25 @@ ngx_http_set_jwt_key_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
     {
         size--;
     }
-    key->data[size] = '\0';
 
+    key->data[size] = '\0';
     key->len = size;
-    ngx_close_file(fd);
+
+    if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
+        ngx_log_error(NGX_LOG_ALERT, cf->log, ngx_errno,
+                      ngx_close_file_n " \"%V\" failed", &file.name);
+    }
 
     return NGX_CONF_OK;
+
+failed:
+
+    if (ngx_close_file(file.fd) == NGX_FILE_ERROR) {
+        ngx_log_error(NGX_LOG_ALERT, cf->log, ngx_errno,
+                      ngx_close_file_n " \"%V\" failed", &file.name);
+    }
+
+    return NGX_CONF_ERROR;
 }
 
 ngx_int_t
